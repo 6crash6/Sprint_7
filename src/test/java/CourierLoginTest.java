@@ -1,191 +1,49 @@
-import io.qameta.allure.Description;
-import io.qameta.allure.Feature;
-import io.qameta.allure.Story;
-import io.restassured.http.ContentType;
+import courier.couriermodel.CourierLoginModel;
 import io.restassured.response.Response;
-import org.junit.Test;
+import org.junit.jupiter.api.DisplayName;
+import org.junit.jupiter.api.Test;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.MethodSource;
 
-import java.util.HashMap;
-import java.util.Map;
-import java.util.UUID;
+import static org.apache.http.HttpStatus.*;
 
-import static io.restassured.RestAssured.given;
-import static org.hamcrest.Matchers.equalTo;
-import static org.hamcrest.Matchers.notNullValue;
+public class CourierLoginTest extends CourierLoginBase {
 
-@Feature("Авторизация курьера")
-public class CourierLoginTest {
 
-    private static final String BASE_URL = "https://qa-scooter.praktikum-services.ru/api/v1/courier";
-    private static final String LOGIN_URL = BASE_URL + "/login";
-    private static final String VALID_PASSWORD = "Qwerty123!";
-    private static final String VALID_FIRST_NAME = "Иван";
-    private static String createdCourierId; // Variable to store the created courier ID
-    private static Map<String, String> credentials; // Variable to store courier credentials
-
-    // Helper method to create a unique courier and return its credentials
-    private static Map<String, String> createUniqueCourier() {
-        String uniqueLogin = "testCourier" + UUID.randomUUID().toString();
-        Map<String, String> creds = new HashMap<>();
-        creds.put("login", uniqueLogin);
-        creds.put("password", VALID_PASSWORD);
-
-        Map<String, Object> body = new HashMap<>();
-        body.put("login", uniqueLogin);
-        body.put("password", VALID_PASSWORD);
-        body.put("firstName", VALID_FIRST_NAME);
-
-        Response response = given()
-                .log().all()
-                .contentType(ContentType.JSON)
-                .body(body)
-                .when()
-                .post(BASE_URL);
-
-        response.then().statusCode(201); // Проверяем, что создание прошло успешно
-
-        return creds;
+    @Test
+    @DisplayName("Проверка авторизации курьера")
+    public void testCourierLogin() {
+        CourierLoginModel courierLoginModel = new CourierLoginModel(newCourier.getLogin(), newCourier.getPassword());
+        Response courierLogin = courierApiClient.loginCourier(courierLoginModel);
+        stepCheck.checkResponseStatusCode(courierLogin, SC_OK);
+        stepCheck.checkResponseFieldExists(courierLogin, "id");
+        stepCheck.checkResponseFieldNotNull(courierLogin, "id");
+        stepCheck.checkResponseFieldNotEmpty(courierLogin, "id");
     }
 
-    // Method to log in a courier
-    private Response loginCourier(String login, String password) {
-        Map<String, Object> body = new HashMap<>();
-        body.put("login", login);
-        body.put("password", password);
+    @ParameterizedTest
+    @MethodSource("provideInvalidCourierLoginData")
+    @DisplayName("Проверка авторизации курьера без обязательных полей")
+    public void testCourierLoginWithOutRequiredFields(String login, String password, String expectedMessage) {
+        CourierLoginModel courierLoginModel = new CourierLoginModel(
+                login == null || login.isBlank() ? null : newCourier.getLogin(),
+                password == null || password.isBlank() ? null : newCourier.getPassword());
+        Response courierLoginResponse = courierApiClient.loginCourier(courierLoginModel);
 
-        return given()
-                .log().all()
-                .contentType(ContentType.JSON)
-                .body(body)
-                .when()
-                .post(LOGIN_URL);
+        stepCheck.checkResponseStatusCode(courierLoginResponse, SC_BAD_REQUEST);
+        stepCheck.checkResponseField(courierLoginResponse, "message", expectedMessage);
     }
 
     @Test
-    @Story("Успешная авторизация курьера")
-    public void testSuccessfulCourierLogin() {
-        if (credentials == null) {
-            credentials = createUniqueCourier();
-        }
+    @DisplayName("Проверка авторизации курьера с несуществующим логином и паролем")
+    public void testCourierLoginWithNonExistentCredentials() {
+        String courierPasswordRandom = "1234" + faker.number().numberBetween(100, 100000);
 
-        Response loginResponse = loginCourier(credentials.get("login"), credentials.get("password"));
-
-        loginResponse.then()
-                .statusCode(200)
-                .contentType(ContentType.JSON)
-                .body("id", notNullValue());
-
-        // Capture the courier ID
-        createdCourierId = loginResponse.jsonPath().getString("id");
-    }
-
-    @Test
-    @Story("Авторизация с неверным логином")
-    public void testInvalidLogin() {
-        if (credentials == null) {
-            credentials = createUniqueCourier();
-        }
-
-        Response response = loginCourier("wrongLogin", credentials.get("password"));
-
-        response.then()
-                .statusCode(404)
-                .contentType(ContentType.JSON)
-                .body("message", equalTo("Учетная запись не найдена"));
-    }
-
-    @Test
-    @Story("Авторизация с неверным паролем")
-    public void testInvalidPassword() {
-        if (credentials == null) {
-            credentials = createUniqueCourier();
-        }
-
-        Response response = loginCourier(credentials.get("login"), "wrongPassword");
-
-        response.then()
-                .statusCode(404)
-                .contentType(ContentType.JSON)
-                .body("message", equalTo("Учетная запись не найдена"));
-    }
-
-    @Test
-    @Story("Авторизация без логина")
-    public void testMissingLogin() {
-        if (credentials == null) {
-            credentials = createUniqueCourier();
-        }
-
-        Response response = loginCourier("", VALID_PASSWORD);
-        response.then()
-                .statusCode(400)
-                .contentType(ContentType.JSON)
-                .body("message", equalTo("Недостаточно данных для входа"));
-    }
-
-    @Test
-    @Story("Авторизация без пароля")
-    public void testMissingPassword() {
-        if (credentials == null) {
-            credentials = createUniqueCourier();
-        }
-
-        Response response = loginCourier(credentials.get("login"), "");
-        response.then()
-                .statusCode(400)
-                .contentType(ContentType.JSON)
-                .body("message", equalTo("Недостаточно данных для входа"));
-    }
-
-    @Test
-    @Story("Авторизация без всех полей")
-    public void testWithoutData() {
-        if (credentials == null) {
-            credentials = createUniqueCourier();
-        }
-
-        Response response = loginCourier("", "");
-        response.then()
-                .statusCode(400)
-                .contentType(ContentType.JSON)
-                .body("message", equalTo("Недостаточно данных для входа"));
-    }
-
-    @Test
-    @Story("Удаление курьера")
-    public void testDeleteCourier() {
-        // Check if courier ID is available
-        if (createdCourierId == null) {
-            throw new IllegalStateException("Courier ID is null. Ensure successful login test was executed.");
-        }
-
-        // Delete the courier
-        Response response = given()
-                .log().all()
-                .contentType(ContentType.JSON)
-                .when()
-                .delete(BASE_URL + "/" + createdCourierId);
-
-        // Verify successful deletion
-        response.then()
-                .statusCode(200)
-                .contentType(ContentType.JSON)
-                .body("ok", equalTo(true));
-
-        System.out.println("Курьер с ID " + createdCourierId + " успешно удален.");
-
-        // Verify that the courier is actually deleted
-        Response checkResponse = given()
-                .log().all()
-                .contentType(ContentType.JSON)
-                .when()
-                .get(BASE_URL + "/" + createdCourierId);
-
-        // Expect that the courier is not found
-        checkResponse.then()
-                .statusCode(404);
-
-        System.out.println("Курьер с ID " + createdCourierId + " не найден. Удаление подтверждено.");
+        CourierLoginModel courierLoginModel = new CourierLoginModel(courierLoginRandom, courierPasswordRandom);
+        Response courierLogin = courierApiClient.loginCourier(courierLoginModel);
+        stepCheck.checkResponseStatusCode(courierLogin, SC_NOT_FOUND);
+        stepCheck.checkResponseField(courierLogin, "code", SC_NOT_FOUND);
+        stepCheck.checkResponseField(courierLogin, "message", "Учетная запись не найдена");
     }
 
 }
